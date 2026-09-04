@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123c37">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>FCAH&PT | Academic Timetable</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-mark"><span>F</span><strong>FCAH<span>&PT</span></strong></div>
+      <p class="sidebar-label">Academic office</p>
+      <nav class="side-nav" aria-label="Main navigation">
+        <a class="active" href="index.html"><span class="nav-icon">⌂</span> Today</a>
+        <a href="timetable.html"><span class="nav-icon">▦</span> Timetable</a>
+        <a href="courses.html"><span class="nav-icon">◫</span> Course directory</a>
+        <a href="about.html"><span class="nav-icon">◎</span> About the schedule</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="status-dot"></div>
+        <div><strong>2025/2026 session</strong><small>Second semester</small></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Academic office</span><b>/</b><strong>Timetable</strong></div>
+        <div class="top-actions"><button class="icon-button" id="printButton" aria-label="Print timetable" title="Print timetable">⇧</button><div class="avatar">AO</div></div>
+      </header>
+
+      <section class="hero" id="about">
+        <div>
+          <p class="eyebrow">Federal College of Animal Health and Production Technology, Vom</p>
+          <h1>Find your week.<br><em>Own your time.</em></h1>
+          <p class="hero-copy">Your classes for today, plus a clear path to the complete official timetable.</p>
+        </div>
+        <div class="hero-art" aria-hidden="true"><div class="sun"></div><div class="hill hill-one"></div><div class="hill hill-two"></div><div class="leaf leaf-one">⌁</div><div class="leaf leaf-two">⌁</div></div>
+      </section>
+
+      <section class="toolbar" aria-label="Timetable filters">
+        <div class="filter search-filter"><label for="search">Search</label><div class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Course code or title"></div></div>
+        <div class="filter"><label for="department">Department</label><select id="department"><option value="all">All departments</option></select></div>
+        <div class="filter"><label for="level">Level / class</label><select id="level"><option value="all">All levels</option></select></div>
+        <div class="filter"><label for="dayFilter">Day</label><select id="dayFilter"><option value="all">All days</option></select></div>
+        <div class="filter"><label for="sessionFilter">Session</label><select id="sessionFilter"><option value="all">All sessions</option><option value="lecture">Lectures</option><option value="practical">Practicals</option></select></div>
+        <div class="filter"><label for="semesterFilter">Semester</label><select id="semesterFilter"><option value="all">All semesters</option></select></div>
+        <button class="reset-button" id="resetButton">Reset filters</button>
+      </section>
+
+      <section class="summary-row">
+        <div><p class="section-kicker">Current view</p><h2 id="viewTitle">All timetables</h2><p id="viewSubtitle">Loading your schedule...</p></div>
+        <div class="stats"><div><strong id="pageCount">0</strong><span>timetables</span></div><div><strong id="classCount">0</strong><span>classes this week</span></div><div><strong id="courseCount">0</strong><span>courses</span></div></div>
+      </section>
+
+      <section class="schedule-panel" id="schedule">
+        <div class="panel-heading"><div><p class="section-kicker">Today at FCAH&PT</p><h2 id="scheduleHeading">Your classes today</h2></div><div class="legend"><span><i class="legend-dot"></i> Lecture</span><span><i class="legend-dot practical"></i> Practical</span></div></div>
+        <div class="table-scroll"><div class="schedule-grid" id="scheduleGrid"></div></div>
+        <div class="empty-state" id="emptyState" hidden><span>⌁</span><h3>No timetable found</h3><p>Try clearing a filter or searching for another course.</p></div>
+      </section>
+
+      <section class="courses-section" id="courses"><div class="section-heading"><div><p class="section-kicker">Reference</p><h2>Course directory</h2></div><span id="directoryCount">0 courses</span></div><div class="course-list" id="courseList"></div></section>
+        <div class="pagination" id="pagination" aria-label="Today cards pagination"></div>
+      <footer><span>Official academic schedule · FCAH&PT Vom</span><span id="updatedText">Source: supplied timetable data</span></footer>
+    </main>
+  </div>
+  <div class="modal-backdrop" id="detailsModal" hidden>
+    <section class="details-modal" role="dialog" aria-modal="true" aria-labelledby="detailsTitle">
+      <button class="modal-close" id="closeDetails" aria-label="Close details">×</button>
+      <p class="section-kicker">Class details</p>
+      <h2 id="detailsTitle">Course details</h2>
+      <p class="modal-course-title" id="detailsCourseTitle"></p>
+      <div class="details-grid" id="detailsGrid"></div>
+      <div class="details-note" id="detailsNote"></div>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
