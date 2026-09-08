@@ -1,9 +1,10 @@
 const state = { data: null, pages: [], filteredPages: [], mode: document.body?.dataset.page || 'today', currentPage: 1 };
-const days = ['MON', 'TUES', 'WED', 'THURS', 'FRI'];
-const slots = ['8-9AM', '9-10AM', '10-11AM', '11-12PM', '12-1PM', '1-2PM', '2-3PM', '3-4PM'];
+let days = [];
+let slots = [];
 const $ = (selector) => document.querySelector(selector);
 const clean = (value) => value || '';
 const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+const isValidEntry = (entry) => Boolean(entry?.day && entry?.time && entry?.course);
 
 function ensureSharedControls() {
   if (!document.querySelector('link[rel="manifest"]')) document.head.insertAdjacentHTML('beforeend', '<link rel="manifest" href="manifest.webmanifest">');
@@ -46,7 +47,14 @@ async function loadData() {
     const response = await fetch('timetable_data.json');
     if (!response.ok) throw new Error('Unable to load timetable data');
     state.data = await response.json();
-    state.pages = (state.data.pages || []).map((page, index) => ({ ...page, _index: index }));
+    state.pages = enrichPageLevels((state.data.pages || []).map((page, index) => ({ ...page, _index: index })))
+      .filter((page) => (page.timetable_entries || []).length > 0);
+    const entries = state.pages.flatMap((page) => page.timetable_entries || []).filter(isValidEntry);
+    days = [...new Set(entries.map((entry) => entry.day).filter(Boolean))];
+    slots = [...new Set(entries.map((entry) => entry.time).filter(Boolean))].sort((a, b) => {
+      const startTime = (value) => Number.parseInt(String(value).match(/^\s*\d+/)?.[0] || '0', 10);
+      return startTime(a) - startTime(b) || a.localeCompare(b);
+    });
     populateFilters();
     applyFilters();
   } catch (error) {
@@ -59,15 +67,62 @@ function uniqueHeaders(key) {
   return [...new Set(state.pages.map((page) => page.header?.[key]).filter(Boolean))].sort();
 }
 
+function normalizeDepartment(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase()
+    .replace(/^DEPARTMENT OF /, '')
+    .replace(/^DEPARTMENT /, '')
+    .replace(/PRODCUTION/g, 'PRODUCTION')
+    .replace(/TECNOLOGY/g, 'TECHNOLOGY');
+}
+
+function normalizeLevel(value) {
+  return String(value || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/^(HND|ND)\s*(1|11|I|II)$/, (_, program, numeral) => `${program} ${numeral === '1' || numeral === 'I' ? 'I' : 'II'}`);
+}
+
+function pageLevel(page) {
+  const headerLevel = normalizeLevel(page.header?.level);
+  if (headerLevel) return headerLevel;
+  const source = String(page.raw_text || '').slice(0, 1200).toUpperCase().replace(/\s+/g, ' ');
+  const match = source.match(/\b(HND|ND)\s*(II|11|I|1)(?=[A-Z(]|$)/);
+  return match ? normalizeLevel(`${match[1]} ${match[2]}`) : '';
+}
+
+function enrichPageLevels(pages) {
+  let previousDepartment = '';
+  let previousLevel = '';
+  return pages.map((page) => {
+    const department = normalizeDepartment(page.header?.department);
+    const level = pageLevel(page) || (department === previousDepartment ? previousLevel : '');
+    previousDepartment = department;
+    previousLevel = level;
+    return { ...page, _level: level };
+  });
+}
+
+function departmentOptions() {
+  const options = new Map();
+  uniqueHeaders('department').forEach((department) => {
+    const value = normalizeDepartment(department);
+    if (!options.has(value)) options.set(value, value);
+  });
+  return [...options.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+}
+
 function populateFilters() {
   const department = $('#department');
   const level = $('#level');
-  uniqueHeaders('department').forEach((item) => department.add(new Option(item.replace(/^DEPARTMENT OF /, ''), item)));
-  uniqueHeaders('level').forEach((item) => level.add(new Option(item, item)));
+  departmentOptions().forEach(([value, label]) => department.add(new Option(label, value)));
+  [...new Set(state.pages.map((page) => page._level).filter(Boolean))].sort().forEach((item) => level.add(new Option(item, item)));
   days.forEach((day) => $('#dayFilter')?.add(new Option(day, day)));
   const semester = state.data.source?.semester;
   if (semester) $('#semesterFilter')?.add(new Option(semester, semester));
-  if (state.mode === 'today' && $('#dayFilter')) $('#dayFilter').value = days[(new Date().getDay() + 6) % 7] || 'MON';
+  if (state.mode === 'today' && $('#dayFilter')) {
+    const today = ['SUN', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT'][new Date().getDay()];
+    $('#dayFilter').value = days.find((day) => day === today || day.startsWith(today)) || days[0] || 'all';
+  }
 }
 
 function isPractical(entry) { return /\(L\)|PRACTICAL|LAB/i.test(entry.course); }
@@ -75,7 +130,7 @@ function isPractical(entry) { return /\(L\)|PRACTICAL|LAB/i.test(entry.course); 
 function getVisibleEntries() {
   const day = $('#dayFilter')?.value || 'all';
   const session = $('#sessionFilter')?.value || 'all';
-  return state.filteredPages.flatMap((page) => (page.timetable_entries || []).filter((entry) => {
+  return state.filteredPages.flatMap((page) => (page.timetable_entries || []).filter((entry) => isValidEntry(entry)).filter((entry) => {
     return (day === 'all' || entry.day === day) && (session === 'all' || (session === 'practical' ? isPractical(entry) : !isPractical(entry)));
   }));
 }
@@ -87,9 +142,9 @@ function applyFilters() {
   const semester = $('#semesterFilter')?.value || 'all';
   state.filteredPages = state.pages.filter((page) => {
     const header = page.header || {};
-    const entries = page.timetable_entries || [];
+    const entries = (page.timetable_entries || []).filter(isValidEntry);
     const matchesSearch = !search || entries.some((entry) => `${entry.course} ${entry.title || ''}`.toLowerCase().includes(search));
-    return (department === 'all' || header.department === department) && (level === 'all' || header.level === level) && (semester === 'all' || state.data.source?.semester === semester) && matchesSearch;
+    return (department === 'all' || normalizeDepartment(header.department) === department) && (level === 'all' || page._level === level) && (semester === 'all' || state.data.source?.semester === semester) && matchesSearch;
   });
   state.currentPage = 1;
   renderSummary();
@@ -155,7 +210,7 @@ function renderSchedule() {
 function renderCourses() {
   if (!$('#courseList')) return;
   const map = new Map();
-  state.filteredPages.flatMap((page) => page.timetable_entries || []).forEach((entry) => {
+  state.filteredPages.flatMap((page) => (page.timetable_entries || []).filter(isValidEntry)).forEach((entry) => {
     const code = entry.course?.replace(/\(.*/, '');
     if (code && !map.has(code)) map.set(code, entry.title || 'Course in timetable');
   });
