@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fcahpt-timetable-v1';
+const CACHE_NAME = 'fcahpt-timetable-v2';
 const APP_SHELL = ['./', './index.html', './timetable.html', './courses.html', './about.html', './styles.css', './app.js', './timetable_data.json', './manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {

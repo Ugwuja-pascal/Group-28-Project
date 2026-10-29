@@ -5,6 +5,16 @@ const $ = (selector) => document.querySelector(selector);
 const clean = (value) => value || '';
 const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
 const isValidEntry = (entry) => Boolean(entry?.day && entry?.time && entry?.course);
+const dayAliases = { MONDAY: 'MON', TUES: 'TUES', TUE: 'TUES', TUESDAY: 'TUES', WEDNESDAY: 'WED', THUR: 'THURS', THU: 'THURS', THURS: 'THURS', THURSDAY: 'THURS', FRIDAY: 'FRI' };
+const dayOrder = ['SUN', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT'];
+const normalizeDay = (day) => {
+  const normalized = String(day || '').trim().toUpperCase();
+  return Object.hasOwn(dayAliases, normalized) ? dayAliases[normalized] : normalized;
+};
+const dayIndex = (day) => {
+  const index = dayOrder.indexOf(day);
+  return index < 0 ? dayOrder.length : index;
+};
 
 function ensureSharedControls() {
   if (!document.querySelector('link[rel="manifest"]')) document.head.insertAdjacentHTML('beforeend', '<link rel="manifest" href="manifest.webmanifest">');
@@ -47,10 +57,15 @@ async function loadData() {
     const response = await fetch('timetable_data.json');
     if (!response.ok) throw new Error('Unable to load timetable data');
     state.data = await response.json();
-    state.pages = enrichPageLevels((state.data.pages || []).map((page, index) => ({ ...page, _index: index })))
+    state.pages = enrichPageLevels((state.data.pages || []).map((page, index) => ({
+      ...page,
+      _index: index,
+      timetable_entries: (page.timetable_entries || []).map((entry) => ({ ...entry, day: normalizeDay(entry.day) }))
+    })))
       .filter((page) => (page.timetable_entries || []).length > 0);
     const entries = state.pages.flatMap((page) => page.timetable_entries || []).filter(isValidEntry);
-    days = [...new Set(entries.map((entry) => entry.day).filter(Boolean))];
+    days = [...new Set(entries.map((entry) => entry.day).filter(Boolean))]
+      .sort((a, b) => dayIndex(a) - dayIndex(b) || a.localeCompare(b));
     slots = [...new Set(entries.map((entry) => entry.time).filter(Boolean))].sort((a, b) => {
       const startTime = (value) => Number.parseInt(String(value).match(/^\s*\d+/)?.[0] || '0', 10);
       return startTime(a) - startTime(b) || a.localeCompare(b);
