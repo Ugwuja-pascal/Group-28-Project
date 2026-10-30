@@ -1,6 +1,5 @@
 const state = { data: null, pages: [], filteredPages: [], mode: document.body?.dataset.page || 'today', currentPage: 1 };
 let days = [];
-let slots = [];
 const $ = (selector) => document.querySelector(selector);
 const clean = (value) => value || '';
 const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
@@ -66,15 +65,14 @@ async function loadData() {
     const entries = state.pages.flatMap((page) => page.timetable_entries || []).filter(isValidEntry);
     days = [...new Set(entries.map((entry) => entry.day).filter(Boolean))]
       .sort((a, b) => dayIndex(a) - dayIndex(b) || a.localeCompare(b));
-    slots = [...new Set(entries.map((entry) => entry.time).filter(Boolean))].sort((a, b) => {
-      const startTime = (value) => Number.parseInt(String(value).match(/^\s*\d+/)?.[0] || '0', 10);
-      return startTime(a) - startTime(b) || a.localeCompare(b);
-    });
     populateFilters();
     applyFilters();
   } catch (error) {
     if ($('#viewSubtitle')) $('#viewSubtitle').textContent = 'Open this folder through a local web server to load the timetable data.';
-    if ($('#scheduleGrid')) $('#scheduleGrid').innerHTML = '<div class="empty-state" style="display:block;grid-column:1/-1"><span>!</span><h3>Data could not be loaded</h3><p>Run a local server in the project folder, then refresh this page.</p></div>';
+    if ($('#scheduleGrid')) {
+      $('#scheduleGrid').classList.remove('schedule-grid', 'today-cards');
+      $('#scheduleGrid').innerHTML = '<div class="empty-state" style="display:block"><span>!</span><h3>Data could not be loaded</h3><p>Run a local server in the project folder, then refresh this page.</p></div>';
+    }
   }
 }
 
@@ -150,6 +148,49 @@ function getVisibleEntries() {
   }));
 }
 
+function getVisibleEntryRecords() {
+  const day = $('#dayFilter')?.value || 'all';
+  const session = $('#sessionFilter')?.value || 'all';
+  return state.filteredPages.flatMap((page, pageIndex) => (page.timetable_entries || []).map((entry, entryIndex) => ({
+    page, pageIndex, entry, entryIndex
+  })).filter(({ entry }) => isValidEntry(entry) &&
+    (day === 'all' || entry.day === day) &&
+    (session === 'all' || (session === 'practical' ? isPractical(entry) : !isPractical(entry)))));
+}
+
+function getTimeRange(time) {
+  const parts = String(time || '').match(/\d{1,2}(?::\d{2})?/g);
+  if (!parts || parts.length < 2) return null;
+  const toTimetableHour = (part) => {
+    const hour = Number.parseInt(part, 10);
+    return hour >= 1 && hour <= 7 ? hour + 12 : hour;
+  };
+  const start = toTimetableHour(parts[0]);
+  let end = toTimetableHour(parts[1]);
+  if (end <= start) end += 12;
+  return start >= 8 && start < 17 && end > start ? { start, end } : null;
+}
+
+function formatCourseLabel(page, entry) {
+  const course = clean(entry.course).trim();
+  const withType = course.match(/^([A-Z0-9]+)\s*\(([^)]+)\)$/i);
+  if (withType) return `${withType[1]} (${withType[2].trim()})`;
+
+  const code = course.replace(/\s*\([^)]*\).*$/, '').trim();
+  const classTable = (page.tables || []).find((table) => table.table_number === 2);
+  const classRecord = classTable?.objects?.find((item) =>
+    String(item.CODE || item['COURSE CODE'] || '').trim().toUpperCase() === code.toUpperCase());
+  const classes = classRecord?.CLASSES;
+  return classes ? `${code} (${classes})` : course;
+}
+
+function getBreakLabel(page, day) {
+  const fallback = { MON: 'B', TUES: 'R', WED: 'E', THURS: 'A', FRI: 'K' };
+  const rows = (page?.tables || []).find((table) => table.table_number === 1)?.objects || [];
+  const value = String(rows.find((row) => normalizeDay(row.DAYS) === day)?.['1-2PM'] || '').trim().toUpperCase();
+  return /^[BREAK]$/.test(value) ? value : fallback[day];
+}
+
 function applyFilters() {
   const department = $('#department').value;
   const level = $('#level').value;
@@ -182,44 +223,57 @@ function renderSummary() {
 }
 
 function renderSchedule() {
-  const grid = $('#scheduleGrid');
-  if (!grid) return;
+  const container = $('#scheduleGrid');
+  if (!container) return;
+  container.classList.remove('schedule-grid', 'today-cards');
   const isToday = state.mode === 'today';
-  grid.innerHTML = isToday ? '' : `<div class="grid-cell grid-header">Day / time</div>${slots.map((slot) => `<div class="grid-cell grid-header">${slot}</div>`).join('')}`;
-  const entries = getVisibleEntries();
-  const visibleDays = isToday ? [$('#dayFilter').value] : ($('#dayFilter').value === 'all' ? days : [$('#dayFilter').value]);
-  if (isToday) {
-    const pageEntries = getVisibleEntries().slice((state.currentPage - 1) * 12, state.currentPage * 12);
-    grid.classList.add('today-cards');
-    grid.innerHTML = pageEntries.sort((a, b) => slots.indexOf(a.time) - slots.indexOf(b.time)).map((entry) => {
-      const practical = isPractical(entry); const code = clean(entry.course);
-      const pageIndex = state.filteredPages.findIndex((page) => (page.timetable_entries || []).includes(entry));
-      const entryIndex = state.filteredPages[pageIndex].timetable_entries.indexOf(entry);
-      return `<button class="class-card${practical ? ' practical' : ''}" data-page-index="${pageIndex}" data-entry-index="${entryIndex}"><span class="class-time">${escapeHtml(entry.time)}</span><span class="class-code">${escapeHtml(code)}</span><span class="class-name">${practical ? 'Practical session' : 'Lecture class'}</span></button>`;
-    }).join('');
-    $('#scheduleHeading').textContent = `${visibleDays[0]} classes`;
-    $('#emptyState').hidden = entries.length > 0; grid.hidden = entries.length === 0; renderPagination(entries.length, 12); return;
-  }
-  grid.classList.remove('today-cards');
-  const page = state.filteredPages[state.currentPage - 1];
-  const pageEntries = page ? (page.timetable_entries || []) : [];
-  visibleDays.forEach((day) => {
-    grid.insertAdjacentHTML('beforeend', `<div class="grid-cell day-cell">${day}</div>`);
-    slots.forEach((slot) => {
-      const matches = pageEntries.filter((entry) => entry.day === day && entry.time === slot);
-      const cards = matches.map((entry) => {
-        const practical = isPractical(entry);
-        const code = clean(entry.course);
-        const pageIndex = state.filteredPages.findIndex((page) => (page.timetable_entries || []).includes(entry));
-        const entryIndex = state.filteredPages[pageIndex].timetable_entries.indexOf(entry);
-        return `<button class="class-card${practical ? ' practical' : ''}" data-page-index="${pageIndex}" data-entry-index="${entryIndex}" title="View ${escapeHtml(code)} details"><span class="class-code">${escapeHtml(code)}</span><span class="class-name">${practical ? 'Practical session' : 'Lecture class'}</span></button>`;
-      }).join('');
-      grid.insertAdjacentHTML('beforeend', `<div class="grid-cell class-cell">${cards}</div>`);
-    });
-  });
+  const visibleRecords = getVisibleEntryRecords();
+  const entries = isToday
+    ? visibleRecords.slice((state.currentPage - 1) * 12, state.currentPage * 12)
+    : visibleRecords.filter(({ pageIndex }) => pageIndex === state.currentPage - 1);
+  const daysToRender = ['MON', 'TUES', 'WED', 'THURS', 'FRI'];
+  const timeSlots = ['8-9AM', '9-10AM', '10-11AM', '11-12PM', '12-1PM', '1-2PM', '2-3PM', '3-4PM', '4-5PM'];
+  const breakPage = entries[0]?.page || state.filteredPages[state.currentPage - 1] || state.filteredPages[0];
+  const header = `<thead><tr><th scope="col">DAYS</th>${timeSlots.map((slot) => `<th scope="col">${slot}</th>`).join('')}</tr></thead>`;
+  const body = daysToRender.map((day) => {
+    const dayEntries = entries.map((record) => ({ ...record, range: getTimeRange(record.entry.time) }))
+      .filter((record) => record.entry.day === day && record.range)
+      .sort((a, b) => a.range.start - b.range.start);
+    const cells = [];
+    for (let slot = 0; slot < timeSlots.length;) {
+      const startHour = slot + 8;
+      const starting = dayEntries.filter((record) => record.range.start === startHour);
+      if (starting.length) {
+        const nextStart = dayEntries
+          .filter((record) => record.range.start > startHour)
+          .reduce((earliest, record) => Math.min(earliest, record.range.start), 17);
+        const endHour = Math.min(
+          17,
+          nextStart,
+          Math.max(...starting.map((record) => record.range.end))
+        );
+        const colspan = Math.max(1, endHour - startHour);
+        const courses = starting.map(({ page, pageIndex, entry, entryIndex }) =>
+          `<button type="button" class="course-entry${isPractical(entry) ? ' practical' : ''}" data-page-index="${pageIndex}" data-entry-index="${entryIndex}" title="View ${escapeHtml(entry.course)} details">${escapeHtml(formatCourseLabel(page, entry))}</button>`
+        ).join('<br>');
+        const breakLabel = slot <= 5 && slot + colspan > 5 ? getBreakLabel(breakPage, day) : '';
+        cells.push(`<td${colspan > 1 ? ` colspan="${colspan}"` : ''}${breakLabel ? ' class="has-break"' : ''}>${breakLabel ? `<span class="break-marker">${escapeHtml(breakLabel)}</span>` : ''}${courses}</td>`);
+        slot += colspan;
+        continue;
+      }
+
+      const breakLabel = slot === 5 ? getBreakLabel(breakPage, day) : '';
+      cells.push(`<td${breakLabel ? ' class="break-slot"' : ''}>${breakLabel ? `<span class="break-marker">${escapeHtml(breakLabel)}</span>` : ''}</td>`);
+      slot += 1;
+    }
+    return `<tr><th scope="row">${day}</th>${cells.join('')}</tr>`;
+  }).join('');
+
+  container.innerHTML = `<table class="schedule-table">${header}<tbody>${body}</tbody></table>`;
+  $('#scheduleHeading').textContent = isToday ? 'Weekly lecture schedule' : 'Lecture schedule';
   $('#emptyState').hidden = entries.length > 0;
-  grid.hidden = entries.length === 0;
-  renderPagination(state.filteredPages.length, 1);
+  container.hidden = entries.length === 0;
+  renderPagination(isToday ? visibleRecords.length : state.filteredPages.length, isToday ? 12 : 1);
 }
 
 function renderCourses() {
@@ -268,10 +322,10 @@ function openDetails(page, entry) {
 function closeDetails() { $('#detailsModal').hidden = true; }
 
 $('#scheduleGrid')?.addEventListener('click', (event) => {
-  const card = event.target.closest('.class-card');
-  if (!card) return;
-  const page = state.filteredPages[Number(card.dataset.pageIndex)];
-  const entry = page?.timetable_entries?.[Number(card.dataset.entryIndex)];
+  const course = event.target.closest('.course-entry');
+  if (!course) return;
+  const page = state.filteredPages[Number(course.dataset.pageIndex)];
+  const entry = page?.timetable_entries?.[Number(course.dataset.entryIndex)];
   if (page && entry) openDetails(page, entry);
 });
 
