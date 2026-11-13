@@ -14,6 +14,29 @@ const dayIndex = (day) => {
   const index = dayOrder.indexOf(day);
   return index < 0 ? dayOrder.length : index;
 };
+const normalizeSearchText = (value) => String(value || '').toLowerCase().replace(/\s+/g, '');
+const normalizeCourseCode = (value) => normalizeSearchText(String(value || '').replace(/\(.*/, ''));
+const getTodayDay = () => dayOrder[new Date().getDay()];
+const getSearchQuery = () => normalizeSearchText($('#search')?.value);
+const getSelectedDay = () => getSearchQuery()
+  ? 'all'
+  : (state.mode === 'today' ? getTodayDay() : ($('#dayFilter')?.value || 'all'));
+const courseRecordCode = (course) => course.CODE || course['COURSE CODE'] || course.CourseCode || course['Course Code'] || course.COURSECODE || course['COURSE/CODE'] || course.COURSE || course.CODES;
+const courseRecordTitle = (course) => course.COURSETITLE || course['COURSE TITLE'] || course.CourseTitle || course['Course Title'] || course.COURSES;
+const courseRecordUnits = (course) => course.UNIT || course.UNITS || course['CREDIT UNIT'] || course['CREDIT UNITS'] || course.CU || '';
+const courseRecordInstructors = (course) => course['LECTURERS/INSTRUCTORS'] || course.LECTURERS || course.Lecturers || '';
+const findCourseTitle = (page, code) => {
+  const normalizedCode = normalizeCourseCode(code);
+  const course = (page.tables || []).flatMap((table) => table.objects || [])
+    .find((item) => normalizeCourseCode(courseRecordCode(item)) === normalizedCode && courseRecordTitle(item));
+  return course ? courseRecordTitle(course) : '';
+};
+const matchesSearch = (entry, page) => {
+  const search = getSearchQuery();
+  if (!search) return true;
+  const title = findCourseTitle(page, entry.course) || entry.title || '';
+  return normalizeCourseCode(entry.course).includes(search) || normalizeSearchText(title).includes(search);
+};
 
 function ensureSharedControls() {
   if (!document.querySelector('link[rel="manifest"]')) document.head.insertAdjacentHTML('beforeend', '<link rel="manifest" href="manifest.webmanifest">');
@@ -133,27 +156,31 @@ function populateFilters() {
   const semester = state.data.source?.semester;
   if (semester) $('#semesterFilter')?.add(new Option(semester, semester));
   if (state.mode === 'today' && $('#dayFilter')) {
-    const today = ['SUN', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT'][new Date().getDay()];
-    $('#dayFilter').value = days.find((day) => day === today || day.startsWith(today)) || days[0] || 'all';
+    const today = getTodayDay();
+    if (!days.includes(today)) $('#dayFilter').add(new Option(today, today));
+    $('#dayFilter').value = today;
+    $('#dayFilter').disabled = true;
   }
 }
 
 function isPractical(entry) { return /\(L\)|PRACTICAL|LAB/i.test(entry.course); }
 
 function getVisibleEntries() {
-  const day = $('#dayFilter')?.value || 'all';
-  const session = $('#sessionFilter')?.value || 'all';
-  return state.filteredPages.flatMap((page) => (page.timetable_entries || []).filter((entry) => isValidEntry(entry)).filter((entry) => {
-    return (day === 'all' || entry.day === day) && (session === 'all' || (session === 'practical' ? isPractical(entry) : !isPractical(entry)));
+  const day = getSelectedDay();
+  const session = getSearchQuery() ? 'all' : ($('#sessionFilter')?.value || 'all');
+  return state.filteredPages.flatMap((page) => (page.timetable_entries || []).filter((entry) => {
+    return isValidEntry(entry) && matchesSearch(entry, page) && (day === 'all' || entry.day === day) &&
+      (session === 'all' || (session === 'practical' ? isPractical(entry) : !isPractical(entry)));
   }));
 }
 
 function getVisibleEntryRecords() {
-  const day = $('#dayFilter')?.value || 'all';
-  const session = $('#sessionFilter')?.value || 'all';
+  const day = getSelectedDay();
+  const session = getSearchQuery() ? 'all' : ($('#sessionFilter')?.value || 'all');
   return state.filteredPages.flatMap((page, pageIndex) => (page.timetable_entries || []).map((entry, entryIndex) => ({
     page, pageIndex, entry, entryIndex
-  })).filter(({ entry }) => isValidEntry(entry) &&
+  })).filter(({ page, entry }) => isValidEntry(entry) &&
+    matchesSearch(entry, page) &&
     (day === 'all' || entry.day === day) &&
     (session === 'all' || (session === 'practical' ? isPractical(entry) : !isPractical(entry)))));
 }
@@ -178,29 +205,27 @@ function formatCourseLabel(page, entry) {
 
   const code = course.replace(/\s*\([^)]*\).*$/, '').trim();
   const classTable = (page.tables || []).find((table) => table.table_number === 2);
-  const classRecord = classTable?.objects?.find((item) =>
-    String(item.CODE || item['COURSE CODE'] || '').trim().toUpperCase() === code.toUpperCase());
+  const classRecord = classTable?.objects?.find((item) => normalizeCourseCode(courseRecordCode(item)) === normalizeCourseCode(code));
   const classes = classRecord?.CLASSES;
   return classes ? `${code} (${classes})` : course;
 }
 
-function getBreakLabel(page, day) {
-  const fallback = { MON: 'B', TUES: 'R', WED: 'E', THURS: 'A', FRI: 'K' };
-  const rows = (page?.tables || []).find((table) => table.table_number === 1)?.objects || [];
-  const value = String(rows.find((row) => normalizeDay(row.DAYS) === day)?.['1-2PM'] || '').trim().toUpperCase();
-  return /^[BREAK]$/.test(value) ? value : fallback[day];
+function getBreakLabel(day) {
+  return ['MON', 'TUES', 'WED', 'THURS', 'FRI'].includes(day) ? 'BREAK' : '';
 }
 
 function applyFilters() {
   const department = $('#department').value;
   const level = $('#level').value;
-  const search = $('#search').value.trim().toLowerCase();
+  const search = getSearchQuery();
   const semester = $('#semesterFilter')?.value || 'all';
   state.filteredPages = state.pages.filter((page) => {
     const header = page.header || {};
     const entries = (page.timetable_entries || []).filter(isValidEntry);
-    const matchesSearch = !search || entries.some((entry) => `${entry.course} ${entry.title || ''}`.toLowerCase().includes(search));
-    return (department === 'all' || normalizeDepartment(header.department) === department) && (level === 'all' || page._level === level) && (semester === 'all' || state.data.source?.semester === semester) && matchesSearch;
+    const matchesPageSearch = !search || entries.some((entry) => matchesSearch(entry, page));
+    return (search || department === 'all' || normalizeDepartment(header.department) === department) &&
+      (search || level === 'all' || page._level === level) &&
+      (semester === 'all' || state.data.source?.semester === semester) && matchesPageSearch;
   });
   state.currentPage = 1;
   renderSummary();
@@ -211,15 +236,17 @@ function applyFilters() {
 function renderSummary() {
   const pages = state.filteredPages;
   const entries = getVisibleEntries();
-  const courseCodes = new Set(entries.map((entry) => entry.course?.replace(/\(.*/, '')));
+  const courseCodes = new Set(entries.map((entry) => normalizeCourseCode(entry.course)));
   if ($('#pageCount')) $('#pageCount').textContent = pages.length;
   if ($('#classCount')) $('#classCount').textContent = entries.length;
   if ($('#courseCount')) $('#courseCount').textContent = courseCodes.size;
   if ($('#directoryCount')) $('#directoryCount').textContent = `${courseCodes.size} courses`;
   const selectedDepartment = $('#department').selectedOptions[0]?.textContent;
   const selectedLevel = $('#level').value !== 'all' ? ` · ${$('#level').value}` : '';
-  if ($('#viewTitle')) $('#viewTitle').textContent = selectedDepartment === 'All departments' ? 'All timetables' : selectedDepartment;
-  if ($('#viewSubtitle')) $('#viewSubtitle').textContent = `${selectedDepartment || 'All departments'}${selectedLevel} · ${state.data.source?.semester || 'Academic session'}`;
+  if ($('#viewTitle')) $('#viewTitle').textContent = getSearchQuery() ? 'Search results' : selectedDepartment === 'All departments' ? 'All timetables' : selectedDepartment;
+  if ($('#viewSubtitle')) $('#viewSubtitle').textContent = getSearchQuery()
+    ? `All departments · All levels · ${state.data.source?.semester || 'Academic session'}`
+    : `${selectedDepartment || 'All departments'}${selectedLevel} · ${state.data.source?.semester || 'Academic session'}`;
 }
 
 function renderSchedule() {
@@ -227,13 +254,17 @@ function renderSchedule() {
   if (!container) return;
   container.classList.remove('schedule-grid', 'today-cards');
   const isToday = state.mode === 'today';
+  const isSearching = Boolean(getSearchQuery());
   const visibleRecords = getVisibleEntryRecords();
-  const entries = isToday
-    ? visibleRecords.slice((state.currentPage - 1) * 12, state.currentPage * 12)
-    : visibleRecords.filter(({ pageIndex }) => pageIndex === state.currentPage - 1);
-  const daysToRender = ['MON', 'TUES', 'WED', 'THURS', 'FRI'];
+  const entries = isSearching
+    ? visibleRecords
+    : isToday
+      ? visibleRecords.slice((state.currentPage - 1) * 12, state.currentPage * 12)
+      : visibleRecords.filter(({ pageIndex }) => pageIndex === state.currentPage - 1);
+  const daysToRender = isSearching
+    ? dayOrder.filter((day) => visibleRecords.some(({ entry }) => entry.day === day))
+    : isToday ? [getTodayDay()] : ($('#dayFilter')?.value || 'all') === 'all' ? ['MON', 'TUES', 'WED', 'THURS', 'FRI'] : [$('#dayFilter').value];
   const timeSlots = ['8-9AM', '9-10AM', '10-11AM', '11-12PM', '12-1PM', '1-2PM', '2-3PM', '3-4PM', '4-5PM'];
-  const breakPage = entries[0]?.page || state.filteredPages[state.currentPage - 1] || state.filteredPages[0];
   const header = `<thead><tr><th scope="col">DAYS</th>${timeSlots.map((slot) => `<th scope="col">${slot}</th>`).join('')}</tr></thead>`;
   const body = daysToRender.map((day) => {
     const dayEntries = entries.map((record) => ({ ...record, range: getTimeRange(record.entry.time) }))
@@ -253,16 +284,19 @@ function renderSchedule() {
           Math.max(...starting.map((record) => record.range.end))
         );
         const colspan = Math.max(1, endHour - startHour);
-        const courses = starting.map(({ page, pageIndex, entry, entryIndex }) =>
-          `<button type="button" class="course-entry${isPractical(entry) ? ' practical' : ''}" data-page-index="${pageIndex}" data-entry-index="${entryIndex}" title="View ${escapeHtml(entry.course)} details">${escapeHtml(formatCourseLabel(page, entry))}</button>`
+        const courses = starting.map(({ page, pageIndex, entry, entryIndex }) => {
+          const label = escapeHtml(formatCourseLabel(page, entry));
+          const department = normalizeDepartment(page.header?.department) || 'GENERAL';
+          return `<button type="button" class="course-entry${isPractical(entry) ? ' practical' : ''}" data-page-index="${pageIndex}" data-entry-index="${entryIndex}" title="View ${escapeHtml(entry.course)} details">${label}${isSearching ? `<span class="course-department">${escapeHtml(department)}</span>` : ''}</button>`;
+        }
         ).join('<br>');
-        const breakLabel = slot <= 5 && slot + colspan > 5 ? getBreakLabel(breakPage, day) : '';
+        const breakLabel = slot <= 5 && slot + colspan > 5 ? getBreakLabel(day) : '';
         cells.push(`<td${colspan > 1 ? ` colspan="${colspan}"` : ''}${breakLabel ? ' class="has-break"' : ''}>${breakLabel ? `<span class="break-marker">${escapeHtml(breakLabel)}</span>` : ''}${courses}</td>`);
         slot += colspan;
         continue;
       }
 
-      const breakLabel = slot === 5 ? getBreakLabel(breakPage, day) : '';
+      const breakLabel = slot === 5 ? getBreakLabel(day) : '';
       cells.push(`<td${breakLabel ? ' class="break-slot"' : ''}>${breakLabel ? `<span class="break-marker">${escapeHtml(breakLabel)}</span>` : ''}</td>`);
       slot += 1;
     }
@@ -273,19 +307,25 @@ function renderSchedule() {
   $('#scheduleHeading').textContent = isToday ? 'Weekly lecture schedule' : 'Lecture schedule';
   $('#emptyState').hidden = entries.length > 0;
   container.hidden = entries.length === 0;
-  renderPagination(isToday ? visibleRecords.length : state.filteredPages.length, isToday ? 12 : 1);
+  renderPagination(isSearching ? 1 : isToday ? visibleRecords.length : state.filteredPages.length, isToday ? 12 : 1);
 }
 
 function renderCourses() {
   if (!$('#courseList')) return;
   const map = new Map();
-  state.filteredPages.flatMap((page) => (page.timetable_entries || []).filter(isValidEntry)).forEach((entry) => {
-    const code = entry.course?.replace(/\(.*/, '');
-    if (code && !map.has(code)) map.set(code, entry.title || 'Course in timetable');
+  state.filteredPages.flatMap((page) => (page.timetable_entries || [])
+    .filter((entry) => isValidEntry(entry) && matchesSearch(entry, page))
+    .map((entry) => ({ page, entry }))).forEach(({ page, entry }) => {
+    const code = entry.course?.replace(/\(.*/, '').trim();
+    const key = normalizeCourseCode(code);
+    if (key && !map.has(key)) map.set(key, [code, findCourseTitle(page, entry.course) || entry.title || 'Course in timetable']);
   });
-  const courses = [...map.entries()].sort();
-  const visibleCourses = courses.slice((state.currentPage - 1) * 24, state.currentPage * 24);
-  $('#courseList').innerHTML = visibleCourses.map(([code, title]) => `<button class="course-item" data-course-code="${escapeHtml(code)}"><div><strong>${escapeHtml(code)}</strong><small>${escapeHtml(title)}</small></div><span>View details</span></button>`).join('');
+  const courses = [...map.values()].sort(([a], [b]) => a.localeCompare(b));
+  const firstCourse = state.mode === 'courses' ? (state.currentPage - 1) * 24 : 0;
+  const visibleCourses = courses.slice(firstCourse, firstCourse + 24);
+  $('#courseList').innerHTML = courses.length
+    ? visibleCourses.map(([code, title]) => `<button class="course-item" data-course-code="${escapeHtml(code)}"><div><strong>${escapeHtml(code)}</strong><small>${escapeHtml(title)}</small></div><span>View details</span></button>`).join('')
+    : '<p class="course-empty">No courses found. Try another search or reset your filters.</p>';
   if (state.mode === 'courses') renderPagination(courses.length, 24);
 }
 
@@ -298,9 +338,9 @@ function renderPagination(totalItems, pageSize) {
 }
 
 function findCourseDetails(page, code) {
-  const normalizedCode = code.replace(/\(.*/, '').trim();
-  const courseTable = (page.tables || []).find((table) => table.table_number === 3);
-  return courseTable?.objects?.find((course) => course.CODE === normalizedCode) || null;
+  const normalizedCode = normalizeCourseCode(code);
+  return (page.tables || []).flatMap((table) => table.objects || [])
+    .find((course) => normalizeCourseCode(courseRecordCode(course)) === normalizedCode) || null;
 }
 
 function openDetails(page, entry) {
@@ -312,9 +352,9 @@ function openDetails(page, entry) {
     ['Level / class', header.level || 'General timetable'], ['Program / option', header.program_or_option || 'Not specified']
   ];
   $('#detailsTitle').textContent = courseCode;
-  $('#detailsCourseTitle').textContent = course?.COURSETITLE || 'Course session';
+  $('#detailsCourseTitle').textContent = (course && courseRecordTitle(course)) || 'Course session';
   $('#detailsGrid').innerHTML = details.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
-  $('#detailsNote').innerHTML = course ? `<strong>${escapeHtml(course.UNIT || '—')} unit course</strong><br>Instructor(s): ${escapeHtml(course['LECTURERS/INSTRUCTORS'] || 'Not listed in source data')}` : 'This session is listed in the official timetable source. Additional course information was not provided.';
+  $('#detailsNote').innerHTML = course ? `<strong>${escapeHtml(courseRecordUnits(course) || '—')} unit course</strong><br>Instructor(s): ${escapeHtml(courseRecordInstructors(course) || 'Not listed in source data')}` : 'This session is listed in the official timetable source. Additional course information was not provided.';
   $('#detailsModal').hidden = false;
   $('#closeDetails').focus();
 }
@@ -333,7 +373,7 @@ $('#courseList')?.addEventListener('click', (event) => {
   const card = event.target.closest('.course-item');
   if (!card) return;
   const code = card.dataset.courseCode;
-  const match = state.filteredPages.flatMap((page) => (page.timetable_entries || []).map((entry) => ({ page, entry }))).find(({ entry }) => entry.course?.replace(/\(.*/, '') === code);
+  const match = state.filteredPages.flatMap((page) => (page.timetable_entries || []).map((entry) => ({ page, entry }))).find(({ entry }) => normalizeCourseCode(entry.course) === normalizeCourseCode(code));
   if (match) openDetails(match.page, match.entry);
 });
 
@@ -343,7 +383,7 @@ document.addEventListener('keydown', (event) => { if (event.key === 'Escape') cl
 
 ['department','level','dayFilter','sessionFilter','semesterFilter'].forEach((id) => document.getElementById(id)?.addEventListener('change', applyFilters));
 $('#search')?.addEventListener('input', applyFilters);
-$('#resetButton')?.addEventListener('click', () => { ['department','level','dayFilter','sessionFilter','semesterFilter'].forEach((id) => { const element = document.getElementById(id); if (element) element.value = 'all'; }); if ($('#search')) $('#search').value = ''; applyFilters(); });
+$('#resetButton')?.addEventListener('click', () => { ['department','level','dayFilter','sessionFilter','semesterFilter'].forEach((id) => { const element = document.getElementById(id); if (element) element.value = id === 'dayFilter' && state.mode === 'today' ? getTodayDay() : 'all'; }); if ($('#search')) $('#search').value = ''; applyFilters(); });
 $('#printButton')?.addEventListener('click', () => window.print());
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-worker.js').catch(() => {});
 function initializeApp() {

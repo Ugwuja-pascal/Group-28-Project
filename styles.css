@@ -31,9 +31,12 @@
 .schedule-table tbody tr:nth-child(even) td{background:#fbfcfa}
 .schedule-table tbody tr:hover td{background:#f3f8f3}
 .schedule-table tbody td.break-slot,.schedule-table tbody td.has-break{background:#fff3d8;color:#8a6030}
+.schedule-table tbody tr:nth-child(even) td.break-slot,.schedule-table tbody tr:hover td.break-slot,.schedule-table tbody tr:nth-child(even) td.has-break,.schedule-table tbody tr:hover td.has-break{background:#fff3d8;color:#8a6030}
 .schedule-table tbody td.break-slot{text-align:center}
 .break-marker{display:inline-block;margin-right:6px;color:#8a6030;font:800 10px 'DM Sans',sans-serif;letter-spacing:1px}
 .course-entry{display:inline-block;border:1px solid #d9e8dc;border-left:3px solid var(--coral);background:#eff6f0;color:var(--green);font:700 11px 'DM Sans',sans-serif;text-align:left;line-height:1.35;padding:5px 7px;cursor:pointer;transition:background .15s,border-color .15s}
+.course-department{display:block;margin-top:3px;color:#71857c;font-size:9px;font-weight:600;white-space:normal}
+.course-empty{grid-column:1/-1;margin:0;padding:24px;background:#fff;border:1px solid var(--line);color:var(--muted);text-align:center}
 .course-entry:hover{background:#dcece1;border-color:#a9c7b1}
 .course-entry:focus-visible{outline:2px solid #b26a56;outline-offset:2px}
 .course-entry.practical{border-color:#d8d4ed;border-left-color:#9a94cf;background:#f3f1fa}
